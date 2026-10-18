@@ -109,16 +109,21 @@ class WorkChatIntegrationOptionsFlowHandler(config_entries.OptionsFlow):
 
             if not errors:
                 if not external_url.endswith('/'):
-                    external_url += '/'
+                    user_input["external_url"] = external_url + '/'
                 new_data = dict(self._config_entry.data)
-                new_data["external_url"] = external_url
-                new_data["proxy"] = proxy
+                new_data.update(user_input)
                 self.hass.config_entries.async_update_entry(
                     self._config_entry, data=new_data
                 )
                 return self.async_create_entry(title="", data={})
 
         data_schema = vol.Schema({
+            vol.Required("corp_id", default=current.get("corp_id", "")): str,
+            vol.Required("secret", default=current.get("secret", "")): str,
+            vol.Required("agent_id", default=current.get("agent_id", "")): str,
+            vol.Required("token", default=current.get("token", "")): str,
+            vol.Required("aes_key", default=current.get("aes_key", "")): str,
+            vol.Required("receive_user", default=current.get("receive_user", "@all")): str,
             vol.Required("external_url", default=current.get("external_url", "")): str,
             vol.Optional("proxy", default=current.get("proxy", "")): str,
         })
