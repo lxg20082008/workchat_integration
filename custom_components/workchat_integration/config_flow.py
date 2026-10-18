@@ -1,8 +1,30 @@
 from __future__ import annotations
+import re
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry, OptionsFlow
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
-import re
+
+
+def _is_valid_url(url):
+    """验证URL格式是否有效（允许空值）"""
+    if not url or not str(url).strip():
+        return True  # 空值、空白字符串都合法（用于可选 proxy）
+
+    url = url.strip()
+
+    url_pattern = re.compile(
+        r'^(https?)://'  # http:// 或 https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # 域名
+        r'localhost|'  # localhost
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP
+        r'(?::\d+)?'  # 端口
+        r'(?:/?|[/?]\S+)$',
+        re.IGNORECASE
+    )
+    return re.match(url_pattern, url) is not None
+
 
 class WorkChatIntegrationFlowHandler(config_entries.ConfigFlow, domain="workchat_integration"):
     """配置流程处理"""
@@ -13,12 +35,12 @@ class WorkChatIntegrationFlowHandler(config_entries.ConfigFlow, domain="workchat
         if user_input is not None:
             # 验证 external_url
             external_url = user_input.get("external_url", "")
-            if not self._is_valid_url(external_url):
+            if not _is_valid_url(external_url):
                 errors["external_url"] = "invalid_url"
 
             # 验证 proxy（可选）
             proxy_url = user_input.get("proxy", "")
-            if not self._is_valid_url(proxy_url):
+            if not _is_valid_url(proxy_url):
                 errors["proxy"] = "invalid_proxy_url"
 
             if not errors:
@@ -59,20 +81,50 @@ class WorkChatIntegrationFlowHandler(config_entries.ConfigFlow, domain="workchat
             }
         )
 
-    def _is_valid_url(self, url):
-        """验证URL格式是否有效（允许空值）"""
-        if not url or not str(url).strip():
-            return True  # 空值、空白字符串都合法（用于可选 proxy）
+    @staticmethod
+    @callback
+    def async_get_options_flow(entry: ConfigEntry) -> OptionsFlow:
+        """重新配置入口（改 external_url / proxy）"""
+        return WorkChatIntegrationOptionsFlowHandler(entry)
 
-        url = url.strip()
 
-        url_pattern = re.compile(
-            r'^(https?)://'  # http:// 或 https://
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # 域名
-            r'localhost|'  # localhost
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP
-            r'(?::\d+)?'  # 端口
-            r'(?:/?|[/?]\S+)$',
-            re.IGNORECASE
+class WorkChatIntegrationOptionsFlowHandler(config_entries.OptionsFlow):
+    """重新配置流程：改 external_url / proxy（其余字段不变）"""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None) -> FlowResult:
+        errors = {}
+        current = dict(self._config_entry.data)
+
+        if user_input is not None:
+            external_url = user_input.get("external_url", "").strip()
+            proxy = user_input.get("proxy", "").strip()
+
+            if not external_url or not _is_valid_url(external_url):
+                errors["external_url"] = "invalid_url"
+            if not _is_valid_url(proxy):
+                errors["proxy"] = "invalid_proxy_url"
+
+            if not errors:
+                if not external_url.endswith('/'):
+                    external_url += '/'
+                new_data = dict(self._config_entry.data)
+                new_data["external_url"] = external_url
+                new_data["proxy"] = proxy
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry, data=new_data
+                )
+                return self.async_create_entry(title="", data={})
+
+        data_schema = vol.Schema({
+            vol.Required("external_url", default=current.get("external_url", "")): str,
+            vol.Optional("proxy", default=current.get("proxy", "")): str,
+        })
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=data_schema,
+            errors=errors,
         )
-        return re.match(url_pattern, url) is not None
